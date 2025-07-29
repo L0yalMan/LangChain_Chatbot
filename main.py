@@ -4,6 +4,7 @@ import shutil
 import gc
 from typing import List, TypedDict
 import json
+from botocore.exceptions import ClientError
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
 from fastapi.responses import JSONResponse
@@ -54,12 +55,25 @@ retriever = None
 # Try to load the vector store from the persistent directory on startup
 def initialize_vector_store():
     global vectorstore, retriever
+    print(f"------->>>>> Initialize_Vector Store")
+    print(os.path.exists(CHROMA_PATH))
+    print(os.listdir(CHROMA_PATH))
     try:
-        if os.path.exists(CHROMA_PATH) and os.listdir(CHROMA_PATH):
+        if os.path.exists(CHROMA_PATH):
             # print(f"--- LOADING VECTOR STORE FROM {CHROMA_PATH} ---")
             # LOADING VECTOR STORE FROM {CHROMA_PATH}
+            print(f"------->>>>> vectorstore")
             vectorstore = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
-            retriever = vectorstore.as_retriever(search_kwargs={'k': 3})
+            print(f"..........>>>>>>>>>>>>>There are {vectorstore._collection.count()} chunks in the vector store and 6 chunks~~~~<<<<<<<<<-------")
+            retriever = vectorstore.as_retriever(search_kwargs={'k': 6})
+            
+            # Print total chunks in vector store
+            try:
+                collection_count = vectorstore._collection.count()
+                print(f"--- VECTOR STORE INITIALIZED ---")
+                print(f"Total chunks in vector store: {collection_count}")
+            except Exception as e:
+                print(f"Could not get collection count: {e}")
         else:
             print(f"--- NO EXISTING VECTOR STORE FOUND AT {CHROMA_PATH} ---")
             vectorstore = None
@@ -105,9 +119,19 @@ def retrieve_documents(state):
             print("No document exists in the collection.")
             documents = []
         else:
-            documents = retriever.invoke(question)
+            retrieved_docs = retriever.invoke(question)
+            
+            # Print chunks when retrieved
+            print(f"--- CHUNKS RETRIEVED FOR QUESTION: '{question}' ---")
+            print(f"Total chunks retrieved: {len(retrieved_docs)}")
+            for i, doc in enumerate(retrieved_docs):
+                print(f"\n--- RETRIEVED CHUNK {i+1}/{len(retrieved_docs)} ---")
+                print(f"Content: {doc.page_content[:200]}...")  # Show first 200 chars
+                print(f"Metadata: {doc.metadata}")
+                print("-" * 50)
+            
             # Ensure documents are strings or have a 'page_content' attribute
-            documents = [doc.page_content if hasattr(doc, 'page_content') else str(doc) for doc in documents]
+            documents = [doc.page_content if hasattr(doc, 'page_content') else str(doc) for doc in retrieved_docs]
     except Exception as e:
         print(f"Error during document retrieval: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving documents: {str(e)}")
@@ -193,11 +217,32 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.post("/files/delete")
+async def delete_file(request: Request):
+    body = await request.json()
+    user_id = body.get("userId")
+    filename = body.get("filename")
+
+    s3_key = f"document-uploaded/{user_id}/{filename}"
+
+    try:
+        print(f"Deleting the file from S3 bucket")
+        s3_client.delete_object(Bucket=os.getenv("AWS_S3_BUCKET_NAME"), Key=s3_key)
+        print(f"Delete file from S3 bucket successfully")
+        return JSONResponse(
+            status_code=200,
+            content={"message": f"{filename} was deleted from s3 bucket successfully"}
+        )
+    except Exception as e:
+        print(f"Delet Error: {e}")
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+
 
 @app.post("/files/upload/")
 async def upload_file(file: UploadFile = File(...), user_id: str = Form(...)):
@@ -251,6 +296,15 @@ async def upload_file(file: UploadFile = File(...), user_id: str = Form(...)):
         # 2. Split the document into chunks
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_documents(docs)
+        
+        # Print chunks when uploaded
+        print(f"--- CHUNKS CREATED FROM UPLOADED FILE: {file.filename} ---")
+        print(f"Total chunks created: {len(splits)}")
+        for i, chunk in enumerate(splits):
+            print(f"\n--- CHUNK {i+1}/{len(splits)} ---")
+            print(f"Content: {chunk.page_content[:200]}...")  # Show first 200 chars
+            print(f"Metadata: {chunk.metadata}")
+            print("-" * 50)
 
         # 3. Append to existing vector store or create a new one
         if vectorstore:
@@ -268,12 +322,20 @@ async def upload_file(file: UploadFile = File(...), user_id: str = Form(...)):
 
         # 4. Update the global retriever
         retriever = vectorstore.as_retriever(search_kwargs={'k': 3})
+        
+        # Print updated vector store count
+        try:
+            collection_count = vectorstore._collection.count()
+            print(f"--- VECTOR STORE UPDATED ---")
+            print(f"Total chunks in vector store after upload: {collection_count}")
+        except Exception as e:
+            print(f"Could not get updated collection count: {e}")
 
         print(f"File '{file.filename}' processed. Vector store is ready in '{CHROMA_PATH}'.")
 
         return JSONResponse(
             status_code=200,
-            content={"message": f"File '{file.filename}' uploaded, processed, and stored in S3 successfully."}
+            content={"message": f"File '{file.filename}' uploaded, processed, and stored in S3 successfully.", "key": f"{s3_key}"}
         )
 
     except Exception as e:
@@ -289,7 +351,7 @@ async def upload_file(file: UploadFile = File(...), user_id: str = Form(...)):
 
 
 # --- NEW ENDPOINT FOR WEBSITE LINKS ---
-@app.post("/website/ingest/")
+@app.post("/ingest-website/")
 async def ingest_website_link(request: Request):
     """
     Ingests content from a given website URL into the RAG system.
@@ -324,7 +386,15 @@ async def ingest_website_link(request: Request):
         # 2. Split the document into chunks
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_documents(docs)
-        print(f"Split website content into {len(splits)} chunks.")
+        
+        # Print chunks when uploaded from website
+        print(f"--- CHUNKS CREATED FROM WEBSITE: {url} ---")
+        print(f"Total chunks created: {len(splits)}")
+        for i, chunk in enumerate(splits):
+            print(f"\n--- CHUNK {i+1}/{len(splits)} ---")
+            print(f"Content: {chunk.page_content[:200]}...")  # Show first 200 chars
+            print(f"Metadata: {chunk.metadata}")
+            print("-" * 50)
 
         # 3. Append to existing vector store or create a new one
         if vectorstore:
@@ -340,6 +410,14 @@ async def ingest_website_link(request: Request):
 
         # 4. Update the global retriever
         retriever = vectorstore.as_retriever(search_kwargs={'k': 3})
+        
+        # Print updated vector store count
+        try:
+            collection_count = vectorstore._collection.count()
+            print(f"--- VECTOR STORE UPDATED ---")
+            print(f"Total chunks in vector store after website ingestion: {collection_count}")
+        except Exception as e:
+            print(f"Could not get updated collection count: {e}")
 
         print(f"Website content from '{url}' processed and added to vector store.")
 
@@ -373,20 +451,20 @@ async def chat_with_rag(request: Request):
     try:
         body = await request.json()
         question = body.get("question")
-        userId = body.get("userId")
-        sessionId = body.get("sessionId")
+        # userId = body.get("userId")
+        # sessionId = body.get("sessionId")
         if not question:
             raise HTTPException(status_code=400, detail="Question not provided.")
 
         inputs = {"question": question}
         result = rag_graph.invoke(inputs)
 
-        data = [
-            {"user_id": userId, "session_id": sessionId, "role": "user", "content": question},
-            {"user_id": userId, "session_id": sessionId, "role": "ai", "content": result["generation"]}
-        ]
-        response = supabase.table('chat_history').insert(data).execute()
-        print(f"response: {response}")
+        # data = [
+        #     {"user_id": userId, "session_id": sessionId, "role": "user", "content": question},
+        #     {"user_id": userId, "session_id": sessionId, "role": "ai", "content": result["generation"]}
+        # ]
+        # response = supabase.table('chat_history').insert(data).execute()
+        # print(f"response: {response}")
 
         return JSONResponse(
             status_code=200,
@@ -399,16 +477,16 @@ async def chat_with_rag(request: Request):
 
 
 
-@app.get('/chat-history/')
-async def chathistory_from_supabase(userId: str, sessionId: str):
-    try:
-        response = supabase.table('chat_history').select('role, content').eq('user_id', userId).eq('session_id', sessionId).execute()
-        data = json.dumps(response.data, indent=2)
+# @app.get('/chat-history/')
+# async def chathistory_from_supabase(userId: str, sessionId: str):
+#     try:
+#         response = supabase.table('chat_history').select('role, content').eq('user_id', userId).eq('session_id', sessionId).execute()
+#         data = json.dumps(response.data, indent=2)
 
-        return JSONResponse(status_code=200, content={"history": data})
-    except Exception as e:
-        print(f"Error fetching chat history: {e}")
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+#         return JSONResponse(status_code=200, content={"history": data})
+#     except Exception as e:
+#         print(f"Error fetching chat history: {e}")
+#         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 @app.get("/")
 def read_root():

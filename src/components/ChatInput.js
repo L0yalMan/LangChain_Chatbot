@@ -18,7 +18,7 @@ function ChatInput({
   async function uploadDatasetFile(formData) {
     try {
       const response = await axios.post(
-        "https://f8c14eefce75.ngrok-free.app/files/upload",
+        "https://56ab6a3bf149.ngrok-free.app/files/upload",
         formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
@@ -49,7 +49,7 @@ function ChatInput({
   const handleIngestLink = async () => {
     try {
       const response = await axios.post(
-        "https://f8c14eefce75.ngrok-free.app/website/ingest",
+        "https://56ab6a3bf149.ngrok-free.app/website/ingest",
         {
           userId: "1093828",
           url: localWebsiteLink,

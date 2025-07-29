@@ -54,10 +54,31 @@ export default function ChatInterface() {
 
     setTimeout(async () => {
       setIsAiLoading(true)
-      const response = await axios.post(`https://f8c14eefce75.ngrok-free.app/chat`, { question: inputValue })
+      const response = await axios.post(`https://fa2c5e5b19fc.ngrok-free.app/chat`, {
+        question: inputValue,
+        chat_history: [],
+        headers: {
+          "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
+        }
+      })
       const answer = response.data.answer
 
-      const response2 = await axios.post(`https://f8c14eefce75.ngrok-free.app/chat`, { question: answer + 'Please give me one sentences which express above things and it must be less than 15 letters' })
+      const response2 = await axios.post(`https://fa2c5e5b19fc.ngrok-free.app/chat`, {
+        question: answer + 'Please give me one sentences which express above things and it must be less than 15 letters',
+        chat_history: [
+          {
+            role: 'user',
+            content: inputValue
+          },
+          {
+            role: 'ai',
+            content: answer
+          }
+        ],
+        headers: {
+          "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
+        }
+      })
       const chatTitle = response2.data.answer
 
       const { data: chatSessionData, error: chatSessionError } = await supabase.from('chat_sessions').insert({

@@ -77,7 +77,18 @@ export default function ChatInterface({ chatId }: { chatId: string }) {
 
     setTimeout(async () => {
       setIsAiLoading(true)
-      const response = await axios.post(`https://f8c14eefce75.ngrok-free.app/chat`, { question: inputValue })
+      const chat_history = messages.map(message => {
+        return {
+          role: message.role,
+          content: message.content
+        }
+      })
+      const response = await axios.post(`https://fa2c5e5b19fc.ngrok-free.app/chat`, {
+        question: inputValue, chat_history, 
+          headers: {
+          "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
+        }
+       })
       const answer = response.data.answer
       
       const aiResponse: Message = {

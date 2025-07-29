@@ -55,7 +55,7 @@ function App() {
     try {
       console.log('----->>>>>>>>>', message);
       const response = await axios.post(
-        "https://f8c14eefce75.ngrok-free.app/chat",
+        "https://56ab6a3bf149.ngrok-free.app/chat",
         { question: message, userId: "1093828", sessionId: "238291", headers: {
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
         } }

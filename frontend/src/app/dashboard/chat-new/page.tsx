@@ -54,7 +54,7 @@ export default function ChatInterface() {
 
     setTimeout(async () => {
       setIsAiLoading(true)
-      const response = await axios.post(`https://fa2c5e5b19fc.ngrok-free.app/chat`, {
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/chat`, {
         question: inputValue,
         chat_history: [],
         headers: {
@@ -63,7 +63,7 @@ export default function ChatInterface() {
       })
       const answer = response.data.answer
 
-      const response2 = await axios.post(`https://fa2c5e5b19fc.ngrok-free.app/chat`, {
+      const response2 = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/chat`, {
         question: answer + 'Please give me one sentences which express above things and it must be less than 15 letters',
         chat_history: [
           {

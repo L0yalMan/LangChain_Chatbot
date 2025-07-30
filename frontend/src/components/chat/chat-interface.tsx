@@ -83,7 +83,8 @@ export default function ChatInterface({ chatId }: { chatId: string }) {
           content: message.content
         }
       })
-      const response = await axios.post(`https://fa2c5e5b19fc.ngrok-free.app/chat`, {
+      console.log('chat_history--------->>>>>>>>>>>>>', chat_history);
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/chat`, {
         question: inputValue, chat_history, 
           headers: {
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning

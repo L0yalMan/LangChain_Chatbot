@@ -7,73 +7,12 @@ import Modal from './components/Modal';
 import axios from 'axios';
 
 function App() {
-  const [chatHistory, setChatHistory] = useState([]);
-  const [message, setMessage] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [websiteLink, setWebsiteLink] = useState('');
   const [loading, setLoading] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const chatMessagesRef = useRef();
-
-  React.useEffect(() => {
-    async function fetchData() {
-      const response = await getChatHistory("1093828", "238291");
-      setChatHistory([...response]);
-    }
-
-    fetchData();
-  }, []);
-
-  React.useEffect(() => {
-    if (chatMessagesRef.current) {
-      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
-    }
-  }, [chatHistory]);
-
-  const addMessage = (role, content) => {
-    setChatHistory(prev => [...prev, { role, content }]);
-  };                                                                               
-
-  async function getChatHistory(userId, sessionId) {
-    try {
-      const response = await axios.get(`https://f8c14eefce75.ngrok-free.app/chat-history?userId=${userId}&sessionId=${sessionId}`, {
-        headers: {
-          "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
-        }
-      })
-      console.log(response);
-      const chat_history = await JSON.parse(response.data.history);
-      return chat_history
-    } catch (error) {
-      console.log("------>>>>>error", error)
-      return error.res
-    }
-  }
-
-  async function sendMessage(message) {
-    try {
-      console.log('----->>>>>>>>>', message);
-      const response = await axios.post(
-        "https://56ab6a3bf149.ngrok-free.app/chat",
-        { question: message, userId: "1093828", sessionId: "238291", headers: {
-          "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
-        } }
-      );
-      return response.data;
-    } catch (error) {
-      throw error.response.data;
-    }
-  } 
-
-  const handleMessage = async (message) => {
-    try {
-      const response = await sendMessage(message);
-      return response.answer;
-    } catch (error) {
-      console.error(error);
-    }
-  }
+  const chatMessagesRef = useRef();                                                                             
 
   const handleSend = async () => {
     const hasFiles = selectedFiles.length > 0;

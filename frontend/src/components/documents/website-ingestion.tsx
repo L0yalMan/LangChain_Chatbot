@@ -70,7 +70,7 @@ export default function WebsiteIngestion() {
     try {
       setIsIngesting(true)
 
-      const response = await axios.post("https://fa2c5e5b19fc.ngrok-free.app/ingest-website", {
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/ingest-website`, {
         url: websiteUrl,
         userId: user?.id,
       })

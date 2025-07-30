@@ -100,7 +100,7 @@ export default function FileUpload() {
 
     try {
       // Delete from S3
-      const response = await axios.post(`https://fa2c5e5b19fc.ngrok-free.app/files/delete/`, { filename: fileToDelete.name, userId: user?.id })
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/delete/`, { filename: fileToDelete.name, userId: user?.id })
       if(response.status !== 200) {
         throw new Error("Failed to delete file from S3")
       } 
@@ -149,7 +149,7 @@ export default function FileUpload() {
         formData.append("user_id", user?.id as string)
         
         try {
-          const response = await axios.post("https://fa2c5e5b19fc.ngrok-free.app/files/upload", formData)
+          const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/upload`, formData)
           if(response.status === 200) {
             
             const {data: FileData, error} = await supabase.from("files").insert({

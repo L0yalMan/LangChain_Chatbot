@@ -1,9 +1,12 @@
 import os
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+from typing import Dict, Any
+from langchain_chroma import Chroma
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 # from supabase import create_client, Client
 
-load_dotenv('.env') 
+# load_dotenv('.env')  # This is already loaded in main.py 
 
 class Settings(BaseSettings):
     # PROJECT_TITLE: str = ""
@@ -62,3 +65,79 @@ class Settings(BaseSettings):
     #     )
 
 settings = Settings()
+
+CHROMA_PATH = "chroma_db"
+
+llm = None
+embeddings = None
+
+vectorstore: Chroma = None
+retriever = None
+
+def initialize_llm_embeddings():
+    global llm, embeddings
+    try:
+        # Check if GOOGLE_API_KEY is set
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        print(f"DEBUG: GOOGLE_API_KEY found: {'Yes' if google_api_key else 'No'}")
+        if google_api_key:
+            print(f"DEBUG: GOOGLE_API_KEY length: {len(google_api_key)}")
+            print(f"DEBUG: GOOGLE_API_KEY starts with: {google_api_key[:10]}...")
+        
+        if google_api_key is None:
+            print("ERROR: GOOGLE_API_KEY environment variable is not set. Cannot initialize LLM or embeddings.")
+            llm = None
+            embeddings = None
+            return False
+        
+        print("DEBUG: Initializing LLM...")
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.0-flash",
+            temperature=0,
+        )
+        print("DEBUG: Initializing embeddings...")
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+        )
+        print("LLM and embeddings initialized successfully")
+        return True
+    except Exception as e:
+        print(f"ERROR: Failed to initialize LLM or embeddings: {e}")
+        print(f"ERROR: Exception type: {type(e).__name__}")
+        llm = None
+        embeddings = None
+        return False
+
+def get_embeddings():
+    """Get the embeddings instance, ensuring it's initialized."""
+    global embeddings
+    if embeddings is None:
+        print("WARNING: Embeddings not initialized, attempting to initialize now...")
+        initialize_llm_embeddings()
+    return embeddings
+
+def update_vector_store_globals(new_vectorstore, new_retriever):
+    """Update the global vectorstore and retriever variables."""
+    global vectorstore, retriever
+    vectorstore = new_vectorstore
+    retriever = new_retriever
+    print(f"DEBUG: Updated global variables - vectorstore: {vectorstore is not None}, retriever: {retriever is not None}")
+
+def get_global_state():
+    """Get the current state of global variables for debugging."""
+    global vectorstore, retriever, llm, embeddings
+    return {
+        'vectorstore': vectorstore is not None,
+        'retriever': retriever is not None,
+        'llm': llm is not None,
+        'embeddings': embeddings is not None
+    }
+
+RETRIEVAL_CONFIG: Dict[str, Any] = {
+    'default_k': 8,
+    'mmr_k': 12,
+    'mmr_lambda': 0.7,
+    'similarity_threshold': 0.5,
+    'max_chunk_size': 1500,
+    'chunk_overlap': 300,
+}

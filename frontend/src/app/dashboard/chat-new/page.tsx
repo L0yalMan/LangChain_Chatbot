@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import axios from "axios"
 import { supabase } from "@/lib/supabase"
+import ReactMarkdown from "react-markdown"
 
 type Message = {
   id: string
@@ -174,19 +175,22 @@ export default function ChatInterface() {
         <div className="space-y-4">
         {messages.map((message) => (
             <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
+              <div
                 className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                message.role === "user" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-900"
+                  message.role === "user" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-900"
                 }`}
-            >
-                <p className="text-sm">{message.content}</p>
+              >
+                  {/* Render markdown content */}
+                <div className="text-sm whitespace-pre-wrap">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
                 <p className="text-xs mt-1 opacity-70">
-                {new Date(message.created_at).toLocaleTimeString([], {
+                  {new Date(message.created_at).toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
-                })}
+                  })}
                 </p>
-            </div>
+              </div>
             </div>
         ))}
         

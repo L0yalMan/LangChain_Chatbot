@@ -1,14 +1,13 @@
 "use client"
 
-import type React from "react"
-
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import axios from "axios"
 import { supabase } from "@/lib/supabase"
+import ReactMarkdown from "react-markdown"
 
 type Message = {
   id: string
@@ -174,7 +173,10 @@ export default function ChatInterface({ chatId }: { chatId: string }) {
                   message.role === "user" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-900"
                 }`}
               >
-                <p className="text-sm">{message.content}</p>
+                {/* Render markdown content */}
+                <div className="text-sm whitespace-pre-wrap">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
                 <p className="text-xs mt-1 opacity-70">
                   {new Date(message.created_at).toLocaleTimeString([], {
                     hour: "2-digit",

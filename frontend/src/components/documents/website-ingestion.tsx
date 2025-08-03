@@ -7,11 +7,11 @@ import { Globe, Trash2, ExternalLink, CheckCircle, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useAuth } from "@/lib/auth-context"
 import axios from "axios"
 import { toast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { User } from "@supabase/supabase-js"
 
 type IngestedWebsite = {
   id: string
@@ -22,8 +22,7 @@ type IngestedWebsite = {
   favicon?: string
 }
 
-export default function WebsiteIngestion() {
-  const { user } = useAuth()
+export default function WebsiteIngestion({ accessToken, user }: { accessToken: string, user: User }) {
   const [websiteUrl, setWebsiteUrl] = useState("")
   const [isIngesting, setIsIngesting] = useState(false)
   const [ingestedWebsites, setIngestedWebsites] = useState<IngestedWebsite[]>([])
@@ -73,6 +72,9 @@ export default function WebsiteIngestion() {
       const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/ingest-website`, {
         url: websiteUrl,
         userId: user?.id,
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
       })
 
       if(response.status === 200) {

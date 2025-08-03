@@ -6,11 +6,11 @@ import { Upload, X, FileText, File, CheckCircle, XCircle, FileTextIcon, Trash2 }
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import axios from "axios"
-import { useAuth } from "@/lib/auth-context"
 import { toast } from "@/hooks/use-toast"
 import WebsiteIngestion from "./website-ingestion"
 import { supabase } from "@/lib/supabase"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { User } from "@supabase/supabase-js"
 
 type UploadedFile = {
   id: string
@@ -30,10 +30,10 @@ const acceptedFileTypes = {
   "application/pdf": [".pdf"],
   "text/csv": [".csv"],
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+  "application/msword": [".doc"],
 }
 
-export default function FileUpload() {
-  const { user } = useAuth()
+export default function FileUpload({ accessToken, user }: { accessToken: string, user: User }) {
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
@@ -100,7 +100,14 @@ export default function FileUpload() {
 
     try {
       // Delete from S3
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/delete/`, { filename: fileToDelete.name, userId: user?.id })
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/delete/`,
+        {
+          filename: fileToDelete.name,
+          userId: user?.id,
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+        })
       if(response.status !== 200) {
         throw new Error("Failed to delete file from S3")
       } 
@@ -149,7 +156,12 @@ export default function FileUpload() {
         formData.append("user_id", user?.id as string)
         
         try {
-          const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/upload`, formData)
+          const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/upload`, {
+            formData,
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          })
           if(response.status === 200) {
             
             const {data: FileData, error} = await supabase.from("files").insert({
@@ -206,9 +218,10 @@ export default function FileUpload() {
   }
 
   const getFileIcon = (fileType: string) => {
+    console.log(fileType, "fileType");
     if (fileType.includes("pdf")) return <FileText className="h-8 w-8 text-red-500" />
     if (fileType.includes("csv")) return <File className="h-8 w-8 text-green-500" />
-    if (fileType.includes("docx")) return <FileText className="h-8 w-8 text-blue-500" />
+    if (fileType.includes("docx") || fileType.includes("msword") || fileType.includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) return <FileText className="h-8 w-8 text-blue-600" />
     return <File className="h-8 w-8 text-gray-500" />
   }
 
@@ -230,7 +243,7 @@ export default function FileUpload() {
             ) : (
               <div>
                 <p className="text-gray-600 mb-2">Drag & drop files here, or click to select files</p>
-                <p className="text-sm text-gray-500">Supports PDF, CSV files</p>
+                <p className="text-sm text-gray-500">Supports PDF, CSV, DOCX, DOC files</p>
               </div>
             )}
           </div>
@@ -248,7 +261,7 @@ export default function FileUpload() {
         </CardHeader>
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <div className="text-ml text-gray-500">Supported file types: PDF, CSV</div>
+              <div className="text-ml text-gray-500">Supported file types: PDF, CSV, DOCX, DOC</div>
               <Button onClick={handleUpload} disabled={uploading}>
                 {uploading ? "Uploading..." : "Upload Files"}
               </Button>
@@ -268,7 +281,12 @@ export default function FileUpload() {
                   <div className="flex items-center space-x-3">
                     {getFileIcon(uploadedFile.file.type)}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{uploadedFile.file.name}</p>
+                      <p
+                        className="text-sm font-medium break-all max-w-[180px] md:max-w-[220px] lg:max-w-[260px] truncate"
+                        title={uploadedFile.file.name}
+                      >
+                        {uploadedFile.file.name}
+                      </p>
                       <p className="text-xs text-gray-500">{(uploadedFile.file.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
                   </div>
@@ -316,7 +334,12 @@ export default function FileUpload() {
                   <div className="flex items-center space-x-3">
                     {getFileIcon(uploadedFile.type)}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{uploadedFile.name}</p>
+                      <p
+                        className="text-sm font-medium break-all max-w-[180px] md:max-w-[220px] lg:max-w-[260px] truncate"
+                        title={uploadedFile.name}
+                      >
+                        {uploadedFile.name}
+                      </p>
                       <p className="text-xs text-gray-500">{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB</p>
                       <p className="text-xs text-green-600">Uploaded</p>
                     </div>
@@ -348,7 +371,7 @@ export default function FileUpload() {
       )}
 
       {/* Website Ingestion Section */}
-      <WebsiteIngestion />
+      <WebsiteIngestion accessToken={accessToken} user={user} />
 
       {/* Confirmation Dialog */}
       <ConfirmDialog

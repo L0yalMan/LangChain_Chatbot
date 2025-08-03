@@ -24,17 +24,25 @@ type User = {
 }
 
 
+
 export default function ChatInterface() {
   const router = useRouter()
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [user, setUser] = useState<User | null>(null)
+  const [accessToken, setAccessToken] = useState("")
   const [isAiLoading, setIsAiLoading] = useState(false)
   useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
+
+      const { data, error } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+
       if(user) {
         setUser(user as User)
+        setAccessToken(token || "")
+        console.log('accessToken--------->>>>>>>>>>>>>', token)
       }
     }
     
@@ -59,6 +67,7 @@ export default function ChatInterface() {
         question: inputValue,
         chat_history: [],
         headers: {
+          'Authorization': `Bearer ${accessToken}`,
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
         }
       })
@@ -77,6 +86,7 @@ export default function ChatInterface() {
           }
         ],
         headers: {
+          'Authorization': `Bearer ${accessToken}`,
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
         }
       })

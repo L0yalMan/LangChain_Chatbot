@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import axios from "axios"
 import { supabase } from "@/lib/supabase"
 import ReactMarkdown from "react-markdown"
+import { User } from "@supabase/supabase-js"
 
 type Message = {
   id: string
@@ -16,39 +17,14 @@ type Message = {
   created_at: Date
 }
 
-type User = {
-  id: string
-}
-
-
-export default function ChatInterface({ chatId }: { chatId: string }) {
-  const [messages, setMessages] = useState<Message[]>([])
+export default function ChatInterface({ chatId, accessToken, user, chatTitle, chatHistory, isLoading }: { chatId: string, accessToken: string, user: User, chatTitle: string, chatHistory: Message[], isLoading: boolean }) {
+  const [messages, setMessages] = useState<Message[]>(chatHistory)
   const [inputValue, setInputValue] = useState("")
-  const [user, setUser] = useState<User | null>(null)
   const [isAiLoading, setIsAiLoading] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [chatTitle, setChatTitle] = useState("")
+
   useEffect(() => {
-    const getUser = async () => {
-      setIsLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      if(user) {
-        const { data: chatSessionData, error: chatSessionError } = await supabase.from('chat_sessions').select('chat_title').eq('id', chatId).single()
-        if(chatSessionData) {
-          setChatTitle(chatSessionData.chat_title)
-        }
-        const {data: chatHistoryData, error: chatHistoryError} = await supabase.from('chat_history').select('*').eq('user_id', user.id)
-        .eq('session_id', chatId).order('created_at', { ascending: true })
-        if(chatHistoryData) {
-          setMessages(chatHistoryData as Message[])
-        }
-        setUser(user as User)
-      }
-      setIsLoading(false)
-    }
-    
-    getUser()
-  }, [])
+    setMessages(chatHistory)
+  }, [chatHistory])
 
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return
@@ -85,7 +61,8 @@ export default function ChatInterface({ chatId }: { chatId: string }) {
       console.log('chat_history--------->>>>>>>>>>>>>', chat_history);
       const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/chat`, {
         question: inputValue, chat_history, 
-          headers: {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
         }
        })
@@ -161,7 +138,7 @@ export default function ChatInterface({ chatId }: { chatId: string }) {
          </div>
        )}
 
-      { !isLoading && (
+      { !isLoading && messages.length > 0 && (
         <>
           {/* Messages */}
           <ScrollArea className="flex-1 p-4">

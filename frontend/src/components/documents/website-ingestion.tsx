@@ -72,8 +72,11 @@ export default function WebsiteIngestion({ accessToken, user }: { accessToken: s
       const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/ingest-website`, {
         url: websiteUrl,
         userId: user?.id,
+      },
+      {
         headers: {
-          'Authorization': `Bearer ${accessToken}`
+          'Authorization': `Bearer ${accessToken}`,
+          "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
         }
       })
 

@@ -104,8 +104,11 @@ export default function FileUpload({ accessToken, user }: { accessToken: string,
         {
           filename: fileToDelete.name,
           userId: user?.id,
+        },
+        {
           headers: {
-            'Authorization': `Bearer ${accessToken}`
+            'Authorization': `Bearer ${accessToken}`,
+            "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
           }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
         })
       if(response.status !== 200) {
@@ -154,12 +157,16 @@ export default function FileUpload({ accessToken, user }: { accessToken: string,
         const formData = new FormData()
         formData.append("file", selectedFile.file as unknown as Blob)
         formData.append("user_id", user?.id as string)
+
+        console.log("formData.file", formData.get('file'))
+        console.log("formData.user_id", formData.get('user_id'))
         
         try {
-          const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/upload`, {
-            formData,
+          const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/upload`, formData, {
             headers: {
-              'Authorization': `Bearer ${accessToken}`
+              'Content-Type': 'multipart/form-data',
+              'Authorization': `Bearer ${accessToken}`,
+              "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
             }
           })
           if(response.status === 200) {

@@ -60,7 +60,10 @@ export default function ChatInterface({ chatId, accessToken, user, chatTitle, ch
       })
       console.log('chat_history--------->>>>>>>>>>>>>', chat_history);
       const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/chat`, {
-        question: inputValue, chat_history, 
+        question: inputValue,
+        chat_history
+      },
+      {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning

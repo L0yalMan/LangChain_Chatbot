@@ -66,6 +66,8 @@ export default function ChatInterface() {
       const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/chat`, {
         question: inputValue,
         chat_history: [],
+      },
+      {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
@@ -84,7 +86,9 @@ export default function ChatInterface() {
             role: 'ai',
             content: answer
           }
-        ],
+        ]
+      },
+      {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           "ngrok-skip-browser-warning": "true" // Bypass ngrok warning

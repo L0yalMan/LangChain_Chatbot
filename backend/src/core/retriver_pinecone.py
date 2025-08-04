@@ -2,6 +2,7 @@ import os
 import re
 from typing import List, Dict, Any, Optional
 
+from pinecone import ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.documents import Document
 from langchain.retrievers import MultiQueryRetriever
@@ -180,29 +181,28 @@ def initialize_vector_store(user_id: str):
         existing_indexes = pinecone_client.list_indexes()
         if index_name not in existing_indexes:
             print(f"Creating Pinecone index '{index_name}'...")
-            # Parse the environment string to extract cloud and region
-            # Environment format is typically like "gcp-starter" or "us-west1-gcp"
+            # The logic below assumes a specific format for PINECONE_ENVIRONMENT.
+            # A more robust solution might use separate env variables for cloud and region.
             env_parts = settings.PINECONE_ENVIRONMENT.split('-')
             if len(env_parts) >= 2:
-                cloud = env_parts[0]  # e.g., "gcp", "aws", "azure"
+                cloud = env_parts[0]
                 region = settings.PINECONE_ENVIRONMENT
             else:
-                # Fallback to using the environment as both cloud and region
-                cloud = "gcp"  # Default cloud provider
+                cloud = "gcp"
                 region = settings.PINECONE_ENVIRONMENT
             
+            # Use ServerlessSpec directly from the pinecone import
             pinecone_client.create_index(
                 name=index_name,
                 dimension=768,  # Gemini embeddings dimension
                 metric='cosine',
-                spec=pinecone_client.ServerlessSpec(
+                spec=ServerlessSpec( # Corrected: use ServerlessSpec directly
                     cloud=cloud,
                     region=region
                 )
             )
             print(f"Index '{index_name}' created.")
 
-        global index
         index = pinecone_client.Index(index_name)
         try:
             new_vectorstore = PineconeVectorStore(
@@ -218,15 +218,13 @@ def initialize_vector_store(user_id: str):
             return
 
         try:
-            # Get collection count using the new Pinecone API
             stats = index.describe_index_stats()
+            # Correctly access total_vector_count from the stats object
             collection_count = stats.get('total_vector_count', 0)
             print(f"..........>>>>>>>>>>>>>There are {collection_count} chunks in the vector store and {RETRIEVAL_CONFIG['default_k']} chunks~~~~<<<<<<<<<-------")
         except Exception as e:
             print(f"ERROR: Failed to get collection count: {e}")
-            # Don't fail the entire initialization, just continue without count
             collection_count = 0
-
 
         new_retriever = create_advanced_retriever(new_vectorstore)
         if new_retriever is None:

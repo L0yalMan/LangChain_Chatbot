@@ -7,9 +7,10 @@ from src.core.models import ChatRequest
 from src.core.config import get_global_state
 from src.core.retriever import initialize_vector_store
 from src.core.rag_graph import rag_graph
+from src.utils.dependencies import TokenData
 
 
-async def chat_with_rag(request_data: ChatRequest):
+async def chat_with_rag(request_data: ChatRequest, current_user: TokenData):
     """
     Receives a question and returns an answer from the RAG pipeline,
     incorporating chat history.
@@ -18,6 +19,7 @@ async def chat_with_rag(request_data: ChatRequest):
     
     try:
         question = request_data.question.strip()
+        print(f"Current user id is {current_user.user_id}")
         print(f"QUESTION IS {question} - first")
         print(f"QUESTION IS {question} - second")
 

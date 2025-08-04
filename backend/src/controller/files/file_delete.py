@@ -2,8 +2,9 @@ import os
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from botocore.exceptions import ClientError
+from src.utils.dependencies import TokenData
 
-async def delete_file(request: Request):
+async def delete_file(request: Request, current_user: TokenData):
     try:
         try:
             body = await request.json()

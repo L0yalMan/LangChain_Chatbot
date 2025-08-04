@@ -8,11 +8,11 @@ from langchain_chroma import Chroma
 from src.core.config import CHROMA_PATH, update_vector_store_globals
 from src.core.retriever import create_advanced_retriever
 from src.utils.document_processing import load_document, split_documents
+from src.utils.dependencies import TokenData
 
-
-async def upload_file(file: UploadFile = File(...), user_id: str = Form(default="anonymous")):
+async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
     print(f"Received file: {file.filename if file else 'None'}")
-    print(f"Received user_id: {user_id}")
+    print(f"Received user_id: {current_user.user_id}")
     print(f"File object type: {type(file)}")
     if file:
         print(f"File filename: {file.filename}")
@@ -33,17 +33,12 @@ async def upload_file(file: UploadFile = File(...), user_id: str = Form(default=
         if file_extension not in [".pdf", ".csv", ".docx", ".doc"]:
             raise HTTPException(status_code=400, detail="Only PDF, CSV, DOCX, and DOC files are supported.")
 
-        # Use anonymous user if user_id is not provided or empty
-        if not user_id or not user_id.strip():
-            user_id = "anonymous"
-            print("WARNING: No user_id provided, using 'anonymous' as default")
-
         if embeddings is None:
             raise HTTPException(status_code=500, detail="Embeddings not initialized. Please check your Google API key.")
 
         temp_dir = "temp_docs"
         file_path = os.path.join(temp_dir, file.filename)
-        s3_key = f"document-uploaded/{user_id}/{file.filename}"
+        s3_key = f"document-uploaded/{current_user.user_id}/{file.filename}"
 
         try:
             os.makedirs(temp_dir, exist_ok=True)

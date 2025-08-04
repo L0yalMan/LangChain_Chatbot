@@ -5,8 +5,9 @@ from langchain_chroma import Chroma
 from src.core.config import CHROMA_PATH, update_vector_store_globals
 from src.core.retriever import create_advanced_retriever
 from src.utils.document_processing import load_website_content, split_documents
+from src.utils.dependencies import TokenData
 
-async def ingest_website_link(request: Request):
+async def ingest_website_link(request: Request, current_user: TokenData):
     """
     Ingests content from a given website URL into the RAG system.
     It scrapes the content and adds it to the ChromaDB vector store.

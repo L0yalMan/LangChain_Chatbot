@@ -1,5 +1,5 @@
-boto3==1.39.13
-botocore==1.39.13
+boto3==1.37.30
+botocore==1.37.30
 fastapi==0.116.1
 langchain_chroma==0.2.5
 langchain_community==0.3.27
@@ -10,6 +10,11 @@ langgraph==0.5.4
 pydantic==2.11.7
 pydantic_settings==2.10.1
 python-dotenv==1.1.1
-python_dateutil==2.9.0.post0
 supabase==2.17.0
-uvicorn[standard]==0.27.1
+python-multipart==0.0.20
+unstructured==0.15.0
+docx==0.2.4
+docx2txt==0.8
+urllib3==2.0.7
+python-jose[cryptography]==3.3.0
+requests==2.31.0

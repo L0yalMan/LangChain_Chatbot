@@ -7,9 +7,9 @@ from fastapi.responses import JSONResponse
 from fastapi import Request, HTTPException
 
 # Import configuration and routes
-from src.core.config import CHROMA_PATH, initialize_llm_embeddings, get_global_state
+from src.core.config_pinecone import initialize_llm_embeddings_pinecone, get_global_state, Settings
 from src.api.routes import router
-from src.core.retriever import initialize_vector_store
+from src.core.retriver_pinecone import initialize_vector_store
 
 # --- Global Variables & Setup ---
 load_dotenv()
@@ -27,8 +27,8 @@ warnings.filterwarnings("ignore", message=".*unclosed.*")
 
 # FastAPI App
 app = FastAPI(
-    title="RAG System with ChromaDB, LangGraph, and FastAPI",
-    description="An API for uploading documents and chatting with a RAG pipeline.",
+    title="RAG System with Pinecone, LangGraph, and FastAPI",
+    description="An API for uploading documents and chatting with a multi-tenant RAG pipeline.",
     version="1.0.0",
 )
 
@@ -82,42 +82,15 @@ async def startup_event():
     """Initialize the application on startup."""
     print("--- APPLICATION STARTUP ---")
     try:
-        # Ensure the chroma_db directory exists
-        os.makedirs(CHROMA_PATH, exist_ok=True)
-        print(f"Ensured chroma_db directory exists: {CHROMA_PATH}")
-
-        # Initialize LLM and Embeddings globally
-        init_success = initialize_llm_embeddings()
+        # Initialize LLM, embeddings, and Pinecone client globally
+        init_success = initialize_llm_embeddings_pinecone()
         
         if init_success:
-            # Initialize vector store after embeddings are ready
-            initialize_vector_store()
-            
-            # Check global state after initialization
-            global_state = get_global_state()
-            print(f"DEBUG: Global state after initialization: {global_state}")
-            
-            # Import the updated global variables after initialization
-            from src.core.config import vectorstore, retriever
-            
-            # Verify that global variables were properly updated
-            if vectorstore is not None:
-                try:
-                    collection_count = vectorstore._collection.count()
-                    print(f"SUCCESS: Vector store initialized with {collection_count} documents")
-                except Exception as e:
-                    print(f"SUCCESS: Vector store initialized but could not get collection count: {e}")
-            else:
-                print("WARNING: Vector store initialization failed - global variable is None")
-                
-            if retriever is not None:
-                print("SUCCESS: Retriever initialized successfully")
-            else:
-                print("WARNING: Retriever initialization failed - global variable is None")
+            print("SUCCESS: LLM, embeddings, and Pinecone client initialized.")
         else:
-            print("WARNING: LLM and embeddings initialization failed. Vector store will not be available.")
-            print("Please set the GOOGLE_API_KEY environment variable to enable full functionality.")
-
+            print("WARNING: LLM, embeddings, or Pinecone client initialization failed.")
+            print("Please check your GOOGLE_API_KEY and PINECONE_API_KEY environment variables.")
+        
         print("--- APPLICATION STARTUP COMPLETE ---")
     except Exception as e:
         print(f"Error during startup: {e}")
@@ -141,18 +114,19 @@ app.include_router(router)
 @app.get("/")
 def read_root():
     try:
-        return {"message": "LangChain RAG API is running!"}
+        return {"message": "LangChain RAG API with Pinecone is running!"}
     except Exception as e:
         print(f"CRITICAL ERROR in read_root: {e}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
-@app.get("/debug/globals")
-def debug_globals():
-    """Debug endpoint to check global variable states."""
+@app.get("/debug/globals/{user_id}")
+def debug_globals(user_id: str):
+    """Debug endpoint to check global variable states for a specific user."""
+    from src.core.config_pinecone import get_global_state
     try:
-        global_state = get_global_state()
+        global_state = get_global_state(user_id)
         return {
-            "message": "Global variable states",
+            "message": f"Global variable states for user: {user_id}",
             "global_state": global_state
         }
     except Exception as e:

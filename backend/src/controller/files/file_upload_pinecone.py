@@ -3,38 +3,32 @@ import shutil
 from fastapi import UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse
 from botocore.exceptions import ClientError
-from langchain_chroma import Chroma
+from langchain_pinecone import PineconeVectorStore
 
-from src.core.config import CHROMA_PATH, update_vector_store_globals
-from src.core.retriever import create_advanced_retriever
+from src.core.config_pinecone import update_vector_store_globals
+from src.core.retriver_pinecone import create_advanced_retriever, index
 from src.utils.document_processing import load_document, split_documents
 from src.utils.dependencies import TokenData
 
 async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
-    print(f"Received file: {file.filename if file else 'None'}")
-    print(f"Received user_id: {current_user.user_id}")
-    print(f"File object type: {type(file)}")
-    if file:
-        print(f"File filename: {file.filename}")
-        print(f"File content_type: {file.content_type}")
-        print(f"File size: {file.size if hasattr(file, 'size') else 'Unknown'}")
     """
-    Handles file uploads. It appends the new document to the existing ChromaDB vector store if it exists,
-    or creates a new one if not. Also uploads the file to S3.
+    Handles file uploads. It appends the new document to the user's Pinecone vector store
+    and also uploads the file to S3.
     """
-    from src.core.config import embeddings, vectorstore
+    user_id = current_user.user_id
+    from src.core.config_pinecone import embeddings, vectorstores
     from src.utils.s3_client import s3_client
 
     try:
         if not file or not file.filename:
-            raise HTTPException(status_code=400, detail="No file provided or invalid file.")
-
+            raise HTTPException(status_code=400, detail="No file provided.")
+        
         file_extension = os.path.splitext(file.filename)[1]
         if file_extension not in [".pdf", ".csv", ".docx", ".doc"]:
             raise HTTPException(status_code=400, detail="Only PDF, CSV, DOCX, and DOC files are supported.")
 
         if embeddings is None:
-            raise HTTPException(status_code=500, detail="Embeddings not initialized. Please check your Google API key.")
+            raise HTTPException(status_code=500, detail="Embeddings model not initialized.")
 
         temp_dir = "temp_docs"
         file_path = os.path.join(temp_dir, file.filename)
@@ -78,23 +72,26 @@ async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
                 except Exception as e:
                     print(f"ERROR: Failed to print chunk {i+1}: {e}")
 
+            vectorstore = vectorstores.get(user_id)
             if vectorstore:
                 print("--- APPENDING TO EXISTING VECTOR STORE ---")
                 vectorstore.add_documents(splits)
             else:
                 print("--- CREATING NEW VECTOR STORE ---")
-                new_vectorstore = Chroma.from_documents(
-                    documents=splits,
+                new_vectorstore = PineconeVectorStore(
+                    index=index,
                     embedding=embeddings,
-                    persist_directory=CHROMA_PATH
+                    text_key="text",
+                    namespace=user_id
                 )
-                update_vector_store_globals(new_vectorstore, None)  # Will update retriever later
+                update_vector_store_globals(user_id, new_vectorstore, None)
+                vectorstore = new_vectorstore
 
-            # Recreate retriever with updated vector store
-            current_vectorstore = vectorstore  # Get the current vectorstore (might have been updated)
+            # Re-initialize the retriever for the user
+            current_vectorstore = vectorstore
             new_retriever = create_advanced_retriever(current_vectorstore)
             if new_retriever is None:
-                print("WARNING: Failed to create advanced retriever after upload")
+                print("WARNING: Failed to create advanced retriever after file upload")
             else:
                 update_vector_store_globals(current_vectorstore, new_retriever)
 
@@ -105,14 +102,14 @@ async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
             except Exception as e:
                 print(f"Could not get updated collection count: {e}")
 
-            print(f"File '{file.filename}' processed. Vector store is ready in '{CHROMA_PATH}'.")
+            print(f"File '{file.filename}' processed. Vector store is ready in Pinecone.")
 
             # Determine success message based on S3 availability
             if s3_client is not None:
                 message = f"File '{file.filename}' uploaded, processed, and stored in S3 successfully."
             else:
                 message = f"File '{file.filename}' processed and stored locally (S3 not available)."
-            
+
             return JSONResponse(
                 status_code=200,
                 content={"message": message, "key": f"{s3_key}"}
@@ -140,4 +137,4 @@ async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
         raise
     except Exception as e:
         print(f"CRITICAL ERROR in upload_file_route: {e}")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during file upload.")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during file upload.") 

@@ -20,3 +20,11 @@ instructions.txt
 
 # local env files
 .env
+
+# temp  files
+src/api/__pycache__
+src/controller/chat/__pycache__
+src/controller/files/__pycache__
+src/controller/website/__pycache__
+src/core/__pycache__
+src/utils/__pycache__

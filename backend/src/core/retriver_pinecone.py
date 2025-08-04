@@ -1,18 +1,26 @@
 import os
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-from langchain_chroma import Chroma
+from langchain_pinecone import PineconeVectorStore
 from langchain_core.documents import Document
 from langchain.retrievers import MultiQueryRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
 from langchain.retrievers import ContextualCompressionRetriever
 
-from src.core.config import RETRIEVAL_CONFIG, CHROMA_PATH, get_embeddings, update_vector_store_globals
+from src.core.config_pinecone import (
+    RETRIEVAL_CONFIG,
+    get_embeddings,
+    get_pinecone_client,
+    update_vector_store_globals,
+    Settings
+)
 
-def create_advanced_retriever(vectorstore_instance):
+index = None
+
+def create_advanced_retriever(vectorstore_instance: PineconeVectorStore):
     """Create an advanced retriever with multiple search strategies."""
-    from src.core.config import llm
+    from src.core.config_pinecone import llm
     try:
         if vectorstore_instance is None:
             raise ValueError("Vector store instance is None")
@@ -37,6 +45,7 @@ def create_advanced_retriever(vectorstore_instance):
             llm=llm
         )
         return multi_query_retriever
+
     except Exception as e:
         print(f"ERROR: Failed to create advanced retriever: {e}")
         # Fallback to basic retriever
@@ -46,8 +55,8 @@ def create_advanced_retriever(vectorstore_instance):
                 search_kwargs={'k': RETRIEVAL_CONFIG['default_k']}
             )
             return fallback_retriever
-        except Exception as fallback_error:
-            print(f"ERROR: Failed to create fallback retriever: {fallback_error}")
+        except Exception as e_fallback:
+            print(f"CRITICAL ERROR: Failed to create even a basic retriever: {e_fallback}")
             return None
 
 def preprocess_query(query: str) -> str:
@@ -151,59 +160,85 @@ def evaluate_retrieval_quality(query: str, retrieved_docs: List[Document]) -> Di
             'recommendations': ["Error occurred during evaluation"]
         }
 
-def initialize_vector_store():
-    print(f"------->>>>> Initialize_Vector Store")
-    print(f"Chroma path exists: {os.path.exists(CHROMA_PATH)}")
-    try:
-        if os.path.exists(CHROMA_PATH):
-            print(f"Files in vector store directory: {os.listdir(CHROMA_PATH)}")
-        else:
-            print(f"--- NO EXISTING VECTOR STORE FOUND AT {CHROMA_PATH} ---")
-            update_vector_store_globals(None, None)
-            return
-    except Exception as e:
-        print(f"ERROR: Could not check Chroma path or list files: {e}")
-        update_vector_store_globals(None, None)
+def initialize_vector_store(user_id: str):
+    """
+    Initializes a Pinecone vector store and retriever for a specific user.
+    Creates an index if it doesn't exist, and uses the user_id as the namespace.
+    """
+    settings = Settings()
+    index_name = settings.PINECONE_INDEX_NAME
+    pinecone_client = get_pinecone_client()
+    embeddings_instance = get_embeddings()
+
+    if not pinecone_client or not embeddings_instance or not index_name:
+        print("ERROR: Pinecone client, embeddings, or index name not available.")
+        update_vector_store_globals(user_id, None, None)
         return
 
     try:
-        embeddings_instance = get_embeddings()
-        if embeddings_instance is None:
-            print("ERROR: Embeddings not initialized, cannot create vector store")
-            print("Please ensure GOOGLE_API_KEY environment variable is set and initialize_llm_embeddings() was called successfully.")
-            update_vector_store_globals(None, None)
-            return
+        # Check if index exists, and create if not
+        existing_indexes = pinecone_client.list_indexes()
+        if index_name not in existing_indexes:
+            print(f"Creating Pinecone index '{index_name}'...")
+            # Parse the environment string to extract cloud and region
+            # Environment format is typically like "gcp-starter" or "us-west1-gcp"
+            env_parts = settings.PINECONE_ENVIRONMENT.split('-')
+            if len(env_parts) >= 2:
+                cloud = env_parts[0]  # e.g., "gcp", "aws", "azure"
+                region = settings.PINECONE_ENVIRONMENT
+            else:
+                # Fallback to using the environment as both cloud and region
+                cloud = "gcp"  # Default cloud provider
+                region = settings.PINECONE_ENVIRONMENT
+            
+            pinecone_client.create_index(
+                name=index_name,
+                dimension=768,  # Gemini embeddings dimension
+                metric='cosine',
+                spec=pinecone_client.ServerlessSpec(
+                    cloud=cloud,
+                    region=region
+                )
+            )
+            print(f"Index '{index_name}' created.")
 
-        print(f"------->>>>> Loading vectorstore")
+        global index
+        index = pinecone_client.Index(index_name)
         try:
-            new_vectorstore = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings_instance)
+            new_vectorstore = PineconeVectorStore(
+                index=index,
+                embedding=embeddings_instance,
+                text_key="text",
+                namespace=user_id
+            )
             print(f"VECTORSTORE WAS INITIALIZED SUCCESSFULLY!!!!!")
         except Exception as e:
-            print(f"ERROR: Failed to load Chroma vector store: {e}")
-            update_vector_store_globals(None, None)
+            print(f"ERROR: Failed to load Pinecone vector store: {e}")
+            update_vector_store_globals(user_id, None, None)
             return
 
         try:
-            collection_count = new_vectorstore._collection.count()
+            # Get collection count using the new Pinecone API
+            stats = index.describe_index_stats()
+            collection_count = stats.get('total_vector_count', 0)
             print(f"..........>>>>>>>>>>>>>There are {collection_count} chunks in the vector store and {RETRIEVAL_CONFIG['default_k']} chunks~~~~<<<<<<<<<-------")
         except Exception as e:
             print(f"ERROR: Failed to get collection count: {e}")
-            update_vector_store_globals(None, None)
-            return
+            # Don't fail the entire initialization, just continue without count
+            collection_count = 0
+
 
         new_retriever = create_advanced_retriever(new_vectorstore)
         if new_retriever is None:
-            print("ERROR: Failed to create retriever during initialization")
-            update_vector_store_globals(None, None) # Reset vectorstore if retriever can't be made
+            print(f"ERROR: Failed to create retriever for user {user_id}")
+            update_vector_store_globals(user_id, new_vectorstore, None)
             return
 
-        # Update global variables
-        update_vector_store_globals(new_vectorstore, new_retriever)
-
-        print(f"--- VECTOR STORE INITIALIZED ---")
+        update_vector_store_globals(user_id, new_vectorstore, new_retriever)
+        print(f"--- VECTOR STORE INITIALIZED for user {user_id} ---")
         print(f"Total chunks in vector store: {collection_count}")
         print(f"Advanced retriever configured with MMR search")
 
     except Exception as e:
-        print(f"--- CRITICAL ERROR LOADING VECTOR STORE: {e} ---")
-        update_vector_store_globals(None, None)
+        print(f"--- CRITICAL ERROR LOADING VECTOR STORE for user {user_id}: {e} ---")
+        update_vector_store_globals(user_id, None, None)

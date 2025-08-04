@@ -1,49 +1,46 @@
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
-
 from langchain_core.messages import HumanMessage, AIMessage
 
 from src.core.models import ChatRequest
-from src.core.config import get_global_state
-from src.core.retriever import initialize_vector_store
-from src.core.rag_graph import rag_graph
+from src.core.config_pinecone import get_global_state
+from src.core.retriver_pinecone import initialize_vector_store
+from src.core.rag_graph_pinecone import rag_graph
 from src.utils.dependencies import TokenData
 
 
 async def chat_with_rag(request_data: ChatRequest, current_user: TokenData):
     """
     Receives a question and returns an answer from the RAG pipeline,
-    incorporating chat history.
-    Uses the retriever initialized from the persistent ChromaDB.
+    incorporating chat history. Uses the retriever initialized for the specific user.
     """
+    user_id = current_user.user_id
     
     try:
         question = request_data.question.strip()
-        print(f"Current user id is {current_user.user_id}")
-        print(f"QUESTION IS {question} - first")
-        print(f"QUESTION IS {question} - second")
-
-        from src.core.config import vectorstore, retriever
-        if not vectorstore or not retriever:
-            print(f"DEBUG: Global state before re-initialization: {get_global_state()}")
+        print(f"Current user id is {user_id}")
+        print(f"QUESTION IS {question}")
+        
+        from src.core.config_pinecone import vectorstores, retrievers
+        # Check if vectorstore and retriever are initialized for the user
+        if not vectorstores.get(user_id) or not retrievers.get(user_id):
+            print(f"DEBUG: Global state before re-initialization for user {user_id}: {get_global_state(user_id)}")
             try:
-                initialize_vector_store()
-                # Re-import the updated global variables
-                from src.core.config import vectorstore, retriever
+                initialize_vector_store(user_id)
+                from src.core.config_pinecone import vectorstores, retrievers
             except Exception as e:
-                print(f"ERROR: Failed to re-initialize vector store: {e}")
+                print(f"ERROR: Failed to re-initialize vector store for user {user_id}: {e}")
 
-            if not vectorstore or not retriever:
-                print(f"DEBUG: Global state after re-initialization: {get_global_state()}")
-                print(f"detail=Vector store not initialized. Please upload a document first.")
+            if not vectorstores.get(user_id) or not retrievers.get(user_id):
+                print(f"DEBUG: Global state after re-initialization for user {user_id}: {get_global_state(user_id)}")
                 raise HTTPException(
-                    status_code=400,
-                    detail="Vector store not initialized. Please upload a document first."
+                    status_code=500,
+                    detail="Vector store is not ready. Please try uploading a document or website first."
                 )
 
         # Check if vector store has any documents
         try:
-            collection_count = vectorstore._collection.count()
+            collection_count = vectorstores.get(user_id)._collection.count()
             if collection_count == 0:
                 print(f"detail=Vector store is empty. Please upload a document first.")
                 # raise HTTPException(
@@ -56,14 +53,12 @@ async def chat_with_rag(request_data: ChatRequest, current_user: TokenData):
                 status_code=400,
                 detail="Vector store not properly initialized. Please upload a document first."
             )
-
         
-
         lc_chat_history = []
         for msg in request_data.chat_history:
             if msg.role == "user":
                 lc_chat_history.append(HumanMessage(content=msg.content))
-            elif msg.role == "assistant":
+            elif msg.role == "ai":
                 lc_chat_history.append(AIMessage(content=msg.content))
 
         if not question:
@@ -73,7 +68,8 @@ async def chat_with_rag(request_data: ChatRequest, current_user: TokenData):
             raise HTTPException(status_code=400, detail="Question too long. Please keep it under 10,000 characters.")
 
         try:
-            inputs = {"question": question, "chat_history": lc_chat_history}
+            # Pass user_id to the graph to be used for retrieval
+            inputs = {"question": question, "chat_history": lc_chat_history, "user_id": user_id}
             result = rag_graph.invoke(inputs)
         except Exception as e:
             print(f"ERROR: Failed to invoke RAG graph: {e}")

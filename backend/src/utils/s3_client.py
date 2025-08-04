@@ -1,6 +1,6 @@
 import boto3
 import urllib3
-from src.core.config import settings
+from src.core.config_pinecone import settings
 from botocore.config import Config
 
 # Suppress the InsecureRequestWarning for S3 connections

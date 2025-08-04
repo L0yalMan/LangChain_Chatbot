@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 # Import the secret from your main config/app file
-from src.core.config import settings # Adjust this import based on your project structure
+from src.core.config_pinecone import settings # Adjust this import based on your project structure
 
 class TokenData(BaseModel):
     user_id: str

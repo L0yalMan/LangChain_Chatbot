@@ -15,12 +15,8 @@ async def delete_file_endpoint(request: Request):
     return await delete_file(request)
 
 @router.post("/files/upload/")
-async def upload_file_endpoint(file: UploadFile = File(...), user_id: str = Form(default="anonymous")):
-    try:
-        return await upload_file(file, user_id)
-    except Exception as e:
-        print(f"Error in upload_file_endpoint: {e}")
-        raise
+async def upload_file_endpoint(file: UploadFile = File(...), user_id: str = Form(...)):
+    return await upload_file(file, user_id)
 
 @router.post("/ingest-website/")
 async def ingest_website_link_endpoint(request: Request):

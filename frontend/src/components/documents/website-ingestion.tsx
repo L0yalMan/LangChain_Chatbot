@@ -28,6 +28,7 @@ export default function WebsiteIngestion({ accessToken, user }: { accessToken: s
   const [ingestedWebsites, setIngestedWebsites] = useState<IngestedWebsite[]>([])
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [websiteToDelete, setWebsiteToDelete] = useState<IngestedWebsite | null>(null)
+  const [isRemoving, setIsRemoving] = useState(false)
 
   useEffect(() => {
     const fetchIngestedWebsites = async () => {
@@ -127,6 +128,21 @@ export default function WebsiteIngestion({ accessToken, user }: { accessToken: s
   const confirmDeleteWebsite = async () => {
     if (!websiteToDelete) return
 
+    setIsRemoving(true)
+    // Delete from Vector DB
+    const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/delete-website/`,
+      {
+        url: websiteToDelete.url
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          "ngrok-skip-browser-warning": "true" // Bypass ngrok warning
+        }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+      })
+    if(response.status !== 200) {
+      throw new Error("Failed to delete file from Vector DB")
+    }
     try {
       // Delete from Supabase
       const { error } = await supabase
@@ -157,6 +173,7 @@ export default function WebsiteIngestion({ accessToken, user }: { accessToken: s
         icon: <XCircle className="h-5 w-5 text-red-600" />,
       })
     }
+    setIsRemoving(false)
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -312,6 +329,29 @@ export default function WebsiteIngestion({ accessToken, user }: { accessToken: s
                 </div>
               ))}
             </div>
+            {/* Loading Bar */}
+            {isRemoving && (
+              <div className="mt-4">
+                <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+                  <span>Deleting website...</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden relative">
+                  <div 
+                    className="absolute top-0 left-0 h-full bg-blue-500 rounded-full"
+                    style={{ 
+                      width: "30%",
+                      animation: "loading-stick 1.5s ease-in-out infinite"
+                    }}
+                  ></div>
+                  <style jsx>{`
+                    @keyframes loading-stick {
+                      0% { left: -30%; }
+                      100% { left: 100%; }
+                    }
+                  `}</style>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

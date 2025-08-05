@@ -39,6 +39,7 @@ export default function FileUpload({ accessToken, user }: { accessToken: string,
   const [uploading, setUploading] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [fileToDelete, setFileToDelete] = useState<UploadedFile | null>(null)
+  const [removing, setRemoving] = useState(false)
   // const [uploadProgress, setUploadProgress] = useState(0)
 
   useEffect(() => {
@@ -91,13 +92,13 @@ export default function FileUpload({ accessToken, user }: { accessToken: string,
   const removeUploadedFile = (id: string) => {
     setFileToDelete(uploadedFiles.find((file) => file.id === id) || null)
     setDeleteDialogOpen(true)
-    setUploadedFiles((prev) => prev.filter((file) => file.id !== id))
   }
 
 
-  const confirmDeleteWebsite = async () => {
+  const confirmDeleteFile = async () => {
     if (!fileToDelete) return
 
+    setRemoving(true)
     try {
       // Delete from S3
       const response = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/files/delete/`,
@@ -144,6 +145,7 @@ export default function FileUpload({ accessToken, user }: { accessToken: string,
         icon: <XCircle className="h-5 w-5 text-red-600" />,
       })
     }
+    setRemoving(false)
   }
 
   const handleUpload = async () => {
@@ -362,6 +364,29 @@ export default function FileUpload({ accessToken, user }: { accessToken: string,
                 </div>
               ))}
             </div>
+            {/* Loading Bar */}
+            {removing && (
+              <div className="mt-4">
+                <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+                  <span>Deleting File...</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden relative">
+                  <div 
+                    className="absolute top-0 left-0 h-full bg-blue-500 rounded-full"
+                    style={{ 
+                      width: "30%",
+                      animation: "loading-stick 1.5s ease-in-out infinite"
+                    }}
+                  ></div>
+                  <style jsx>{`
+                    @keyframes loading-stick {
+                      0% { left: -30%; }
+                      100% { left: 100%; }
+                    }
+                  `}</style>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -388,7 +413,7 @@ export default function FileUpload({ accessToken, user }: { accessToken: string,
         description={`Are you sure you want to delete "${fileToDelete?.name}"? This action cannot be undone.`}
         confirmText="Delete"
         cancelText="Cancel"
-        onConfirm={confirmDeleteWebsite}
+        onConfirm={confirmDeleteFile}
         variant="destructive"
       />
     </div>

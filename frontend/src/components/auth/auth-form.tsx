@@ -10,6 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/lib/auth-context"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import axios from "axios"
+import { supabase } from "@/lib/supabase"
 
 export default function AuthForm() {
   const [email, setEmail] = useState("")
@@ -29,6 +31,21 @@ export default function AuthForm() {
     if (error) {
       setError(error.message)
     } else {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) {
+        setError(error.message)
+      } else {
+        await axios.get(`${process.env.NEXT_PUBLIC_BACKEND_HOST}/init_user`, {
+          headers: {
+            "Authorization": `Bearer ${data.session?.access_token}`,
+            "Content-Type": "application/json"
+          }
+        }).then((res) => {
+          console.log("res--------->>>>>>>>>>>>>", res)
+        }).catch((err) => {
+          console.log("err--------->>>>>>>>>>>>>", err)
+        })
+      }
       router.push("/dashboard/chat")
     }
 

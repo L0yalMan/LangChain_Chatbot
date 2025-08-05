@@ -6,18 +6,9 @@ from langgraph.graph import END, StateGraph
 
 from src.core.config_pinecone import RETRIEVAL_CONFIG
 from src.core.retriver_pinecone import preprocess_query, evaluate_retrieval_quality
+from src.utils.others import get_collection_count
 
 class GraphState(TypedDict):
-    """
-    Represents the state of our graph.
-    
-    Attributes:
-        question: The user's question.
-        generation: The LLM's generation.
-        documents: A list of retrieved documents.
-        chat_history: The history of the conversation.
-        user_id: The ID of the current user.
-    """
     question: str
     generation: str
     chat_history: List[BaseMessage]
@@ -25,9 +16,6 @@ class GraphState(TypedDict):
     user_id: str
 
 def retrieve_documents(state: GraphState):
-    """
-    Retrieves documents for the user's question using the user-specific retriever.
-    """
     print("---RETRIEVING DOCUMENTS---")
     question = state["question"]
     chat_history = state.get("chat_history", [])
@@ -40,21 +28,15 @@ def retrieve_documents(state: GraphState):
 
     if not vectorstore:
         print("ERROR: No vector store available for this user.")
-        return {"documents": [], "question": question, "chat_history": chat_history}
+        return {"documents": [], "question": question, "chat_history": chat_history, "user_id": user_id}
     
+    # Get total collection count of vector database
     try:
-        # Pinecone does not have a simple collection.count() for a namespace
-        # We can perform a dummy fetch to check if the namespace has any vectors.
-        # This is a bit of a hack, but better than nothing.
         index = vectorstore.index
-        stats = index.describe_index_stats()
-        namespace_stats = stats.namespaces.get(user_id)
-        if not namespace_stats or namespace_stats.vector_count == 0:
-             print("No documents exist in the collection for this user.")
-             return {"documents": [], "question": question, "chat_history": chat_history}
+        get_collection_count(index, user_id, question, chat_history)
     except Exception as e:
         print(f"ERROR: Failed to get index stats: {e}")
-        return {"documents": [], "question": question, "chat_history": chat_history}
+        return {"documents": [], "question": question, "chat_history": chat_history, "user_id": user_id}
 
     try:
         processed_question = preprocess_query(question)
@@ -67,50 +49,64 @@ def retrieve_documents(state: GraphState):
     retrieved_docs = []
     try:
         if retriever:
+            print(f"DEBUG: Using advanced retriever for user {user_id}")
             retrieved_docs = retriever.invoke(processed_question)
             print(f"Advanced retrieval successful with {len(retrieved_docs)} documents.")
         else:
             print("WARNING: No retriever available, performing basic similarity search.")
-            retrieved_docs = vectorstore.similarity_search(
-                query=processed_question,
-                k=RETRIEVAL_CONFIG['default_k']
-            )
-
-        print(f"Number of retrieved docs: {len(retrieved_docs)}")
-        
-        # for i, doc in enumerate(retrieved_docs):
-        #     print(f"Retrieved Document {i+1}: {doc.page_content[:200]}...")
-
+            print(f"DEBUG: Using basic similarity search with k={RETRIEVAL_CONFIG['default_k']}")
+            print(f"DEBUG: Vectorstore namespace: {vectorstore.namespace}")
+            
+            # Try with explicit namespace parameter
+            try:
+                retrieved_docs = vectorstore.similarity_search(
+                    processed_question,
+                    k=RETRIEVAL_CONFIG['default_k'],
+                    namespace=user_id
+                )
+                print(f"Primary similarity search with explicit namespace successful with {len(retrieved_docs)} documents.")
+            except Exception as namespace_error:
+                print(f"DEBUG: Primary similarity search with explicit namespace failed: {namespace_error}")
+                # Fallback to default similarity search
+                retrieved_docs = vectorstore.similarity_search(
+                    processed_question,
+                    k=RETRIEVAL_CONFIG['default_k']
+                )
+                print(f"Primary similarity search successful with {len(retrieved_docs)} documents.")
     except Exception as e:
-        print(f"CRITICAL ERROR during retrieval: {e}")
-        retrieved_docs = []
-
+        print(f"CRITICAL ERROR during primary retrieval: {e}")
+        print(f"DEBUG: Primary retrieval error details: {type(e).__name__}: {str(e)}")
+    
     if retrieved_docs:
         try:
             docs_with_scores = vectorstore.similarity_search_with_relevance_scores(
                 query=processed_question,
-                k=len(retrieved_docs) * 2
+                k=len(retrieved_docs) * 2,
+                namespace=user_id,
             )
+            print(f"DEBUG: Similarity search with relevance scores and explicit namespace successful")
             filtered_docs = [
                 (doc, score) for doc, score in docs_with_scores
                 if score >= RETRIEVAL_CONFIG['similarity_threshold']
             ]
             filtered_docs.sort(key=lambda x: x[1], reverse=True)
+            for doc, score in docs_with_scores:
+                doc.metadata['score'] = score
             top_docs = [doc for doc, score in filtered_docs[:RETRIEVAL_CONFIG['default_k']]]
             if top_docs:
                 retrieved_docs = top_docs
-                print(f"Filtered to {len(retrieved_docs)} high-quality documents.")
+                print(f"Filtered to {len(retrieved_docs)} high-quality documents")
             else:
-                print("No documents met similarity threshold, using all retrieved docs.")
+                print("No documents met similarity threshold, using all retrieved docs")
         except Exception as e:
             print(f"ERROR: Failed to filter documents by relevance: {e}")
-
     print(f"--- CHUNKS RETRIEVED FOR QUESTION: '{question}' ---")
     print(f"Total chunks retrieved: {len(retrieved_docs)}")
+
     for i, doc in enumerate(retrieved_docs):
         print(f"\n--- RETRIEVED CHUNK {i+1}/{len(retrieved_docs)} ---")
-        print(f"Relevance Score: {doc.metadata.get('score', 'N/A')}")
-    
+        print(f"\nRelevance Score: {doc.metadata.get('score', 'N/A')}")
+
     try:
         quality_evaluation = evaluate_retrieval_quality(processed_question, retrieved_docs)
         print(f"--- RETRIEVAL QUALITY EVALUATION ---")
@@ -134,6 +130,7 @@ def retrieve_documents(state: GraphState):
     print(f"Retrieved documents (first 500 chars): {str(documents)[:500]}...")
     return {"documents": documents, "question": question, "chat_history": chat_history, "user_id": user_id}
 
+# Function to genertae answer
 def generate_answer(state: GraphState):
     """
     Generates an answer using the retrieved documents as context.
@@ -141,13 +138,14 @@ def generate_answer(state: GraphState):
     print("---GENERATING ANSWER---")
     from src.core.config_pinecone import llm
     try:
-        question = state["question"]
-        documents = state["documents"]
+        question = state.get("question")
+        documents = state.get("documents", [])
         chat_history = state.get("chat_history", [])
+        user_id = state.get("user_id")
         
         if not question:
             print("WARNING: No question provided in state")
-            return {"documents": [], "question": "", "chat_history": chat_history, "generation": "No question provided."}
+            return {"documents": [], "question": "", "chat_history": chat_history, "generation": "No question provided.", "user_id": user_id}
 
         context = "\n\n".join(str(doc) for doc in documents) if documents else "No relevant context found."
         print(f"Context (first 500 chars): {context[:500]}...")
@@ -158,13 +156,13 @@ def generate_answer(state: GraphState):
                 "documents": documents, 
                 "question": question, 
                 "chat_history": chat_history, 
-                "generation": "I'm sorry, I cannot generate an answer at this time. The language model is not available."
+                "generation": "I'm sorry, I cannot generate an answer at this time. The language model is not available.",
+                "user_id": user_id
             }
         
         # Prepare the prompt template
         prompt = ChatPromptTemplate.from_messages([
-            ("system", 
-                "Here is an improved version of your prompt, specifically optimized to:\n"
+            ("system", "Here is an improved version of your prompt, specifically optimized to:\n"
 "\n"
 "* Handle **comparisons** naturally and intelligently\n"
 "* Avoid robotic or redundant phrases like “In the context, I can’t...”\n"
@@ -224,16 +222,16 @@ def generate_answer(state: GraphState):
 "---\n"
 "\n"
 "Let me know if you’d like a version of this tailored to a **specific use case** (e.g., e-commerce support bot, educational tutor, travel planner, etc.).\n"
-            ),
+),
             MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "Question:\n{question}")
+            ("human", "Context:\n{context}\n\nQuestion:\n{question}")
         ])
         
         rag_chain = prompt | llm | StrOutputParser()
-        generation = rag_chain.invoke({"context": context, "question": question, "chat_history": chat_history})
+        generation = rag_chain.invoke({"context": context, "question": question, "chat_history": chat_history, "user_id": user_id})
         
         print(f"Generation: {generation}")
-        return {"documents": documents, "question": question, "chat_history": chat_history, "generation": generation}
+        return {"documents": documents, "question": question, "chat_history": chat_history, "generation": generation, "user_id": user_id}
     
     except Exception as e:
         print(f"CRITICAL ERROR during answer generation: {e}")
@@ -241,7 +239,8 @@ def generate_answer(state: GraphState):
             "documents": state.get("documents", []),
             "question": state.get("question", ""),
             "chat_history": state.get("chat_history", []),
-            "generation": "I apologize, but I encountered a critical error while processing your request. Please try again."
+            "generation": "I apologize, but I encountered a critical error while processing your request. Please try again.",
+            "user_id": state.get("user_id")
         }
 
 def build_rag_graph():

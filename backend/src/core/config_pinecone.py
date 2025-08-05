@@ -82,7 +82,7 @@ retrievers: Dict[str, Any] = {}
 
 RETRIEVAL_CONFIG: Dict[str, Any] = {
     'default_k': 8,
-    'mmr_k': 8,
+    'mmr_k': 12,
     'mmr_lambda': 0.5,
     'similarity_threshold': 0.7,
     'max_chunk_size': 1500,
@@ -106,7 +106,7 @@ def initialize_llm_embeddings_pinecone():
             raise ValueError("GOOGLE_API_KEY environment variable is not set")
 
         print("DEBUG: Initializing LLM...")
-        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.5)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
         print("DEBUG: Initializing embeddings...")
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         print("DEBUG: Initializing Pinecone client...")

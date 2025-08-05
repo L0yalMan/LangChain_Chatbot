@@ -19,6 +19,142 @@ from src.core.config_pinecone import (
 
 index = None
 
+def load_existing_vector_store(user_id: str, index_name: str, embeddings_instance):
+    """
+    Load existing vector store from Pinecone for a specific user.
+    Returns the vector store if it exists, None otherwise.
+    """
+    try:
+        pinecone_client = get_pinecone_client()
+        if not pinecone_client:
+            print("ERROR: Pinecone client not available for loading vector store")
+            return None
+
+        # Try to get the index directly - this will fail if it doesn't exist
+        try:
+            index = pinecone_client.Index(index_name)
+            print(f"Successfully connected to existing index '{index_name}'")
+        except Exception as e:
+            print(f"Index '{index_name}' does not exist or is not accessible: {e}")
+            return None
+        
+        # Check if there are any vectors in the user's namespace
+        try:
+            stats = index.describe_index_stats()
+            namespaces = stats.get('namespaces', {})
+            user_namespace_stats = namespaces.get(user_id, {})
+            vector_count = user_namespace_stats.get('vector_count', 0)
+            
+            if vector_count == 0:
+                print(f"No existing vectors found for user {user_id} in namespace {user_id}")
+                return None
+                
+            print(f"Found {vector_count} existing vectors for user {user_id}")
+        except Exception as e:
+            print(f"WARNING: Could not check namespace stats: {e}")
+            # Continue anyway, as the vector store might still work
+
+        # Create vector store instance
+        vectorstore = PineconeVectorStore(
+            index=index,
+            embedding=embeddings_instance,
+            text_key="text",
+            namespace=user_id
+        )
+        
+        print(f"Successfully loaded existing vector store for user {user_id}")
+        return vectorstore
+        
+    except Exception as e:
+        print(f"ERROR: Failed to load existing vector store for user {user_id}: {e}")
+        return None
+
+def check_vector_store_exists(user_id: str, index_name: str) -> bool:
+    """
+    Check if a vector store exists for a specific user.
+    Returns True if vectors exist for the user, False otherwise.
+    """
+    try:
+        pinecone_client = get_pinecone_client()
+        if not pinecone_client:
+            return False
+
+        # Try to get the index directly - this will fail if it doesn't exist
+        try:
+            index = pinecone_client.Index(index_name)
+        except Exception as e:
+            print(f"Index '{index_name}' does not exist or is not accessible: {e}")
+            return False
+        
+        # Check if there are any vectors in the user's namespace
+        try:
+            stats = index.describe_index_stats()
+            namespaces = stats.get('namespaces', {})
+            user_namespace_stats = namespaces.get(user_id, {})
+            vector_count = user_namespace_stats.get('vector_count', 0)
+            
+            return vector_count > 0
+            
+        except Exception as e:
+            print(f"WARNING: Could not check namespace stats: {e}")
+            return False
+        
+    except Exception as e:
+        print(f"ERROR: Failed to check vector store existence for user {user_id}: {e}")
+        return False
+
+def ensure_index_exists(index_name: str, pinecone_client, settings) -> bool:
+    """
+    Ensures that a Pinecone index exists, creating it if necessary.
+    Returns True if the index exists and is accessible, False otherwise.
+    """
+    try:
+        # First, try to connect to the index
+        try:
+            index = pinecone_client.Index(index_name)
+            print(f"Successfully connected to existing index '{index_name}'")
+            return True
+        except Exception as e:
+            print(f"Index '{index_name}' does not exist, creating new one...")
+        
+        # Create the index
+        try:
+            cloud = "aws"
+            region = settings.PINECONE_ENVIRONMENT
+            
+            pinecone_client.create_index(
+                name=index_name,
+                dimension=768,  # Gemini embeddings dimension
+                metric='cosine',
+                spec=ServerlessSpec(
+                    cloud=cloud,
+                    region=region
+                )
+            )
+            print(f"Index '{index_name}' created successfully.")
+            
+            # Wait a moment for the index to be ready
+            import time
+            time.sleep(2)
+            
+            # Verify the index was created
+            index = pinecone_client.Index(index_name)
+            print(f"Successfully verified index '{index_name}' creation")
+            return True
+            
+        except Exception as create_error:
+            if "ALREADY_EXISTS" in str(create_error) or "409" in str(create_error):
+                print(f"Index '{index_name}' already exists, connecting to it...")
+                index = pinecone_client.Index(index_name)
+                return True
+            else:
+                print(f"ERROR: Failed to create index '{index_name}': {create_error}")
+                return False
+                
+    except Exception as e:
+        print(f"ERROR: Failed to ensure index exists: {e}")
+        return False
+
 def create_advanced_retriever(vectorstore_instance: PineconeVectorStore):
     """Create an advanced retriever with multiple search strategies."""
     from src.core.config_pinecone import llm
@@ -164,7 +300,7 @@ def evaluate_retrieval_quality(query: str, retrieved_docs: List[Document]) -> Di
 def initialize_vector_store(user_id: str):
     """
     Initializes a Pinecone vector store and retriever for a specific user.
-    Creates an index if it doesn't exist, and uses the user_id as the namespace.
+    First tries to load existing vector store, then creates new one if needed.
     """
     settings = Settings()
     index_name = settings.PINECONE_INDEX_NAME
@@ -177,55 +313,49 @@ def initialize_vector_store(user_id: str):
         return
 
     try:
-        # Check if index exists, and create if not
-        existing_indexes = pinecone_client.list_indexes()
-        if index_name not in existing_indexes:
-            print(f"Creating Pinecone index '{index_name}'...")
-            # The logic below assumes a specific format for PINECONE_ENVIRONMENT.
-            # A more robust solution might use separate env variables for cloud and region.
-            env_parts = settings.PINECONE_ENVIRONMENT.split('-')
-            if len(env_parts) >= 2:
-                cloud = env_parts[0]
-                region = settings.PINECONE_ENVIRONMENT
-            else:
-                cloud = "gcp"
-                region = settings.PINECONE_ENVIRONMENT
+        # First, try to load existing vector store
+        print(f"Attempting to load existing vector store for user {user_id}...")
+        existing_vectorstore = load_existing_vector_store(user_id, index_name, embeddings_instance)
+        
+        if existing_vectorstore:
+            print(f"Successfully loaded existing vector store for user {user_id}")
+            new_vectorstore = existing_vectorstore
+        else:
+            print(f"No existing vector store found for user {user_id}. Creating new one...")
             
-            # Use ServerlessSpec directly from the pinecone import
-            pinecone_client.create_index(
-                name=index_name,
-                dimension=768,  # Gemini embeddings dimension
-                metric='cosine',
-                spec=ServerlessSpec( # Corrected: use ServerlessSpec directly
-                    cloud=cloud,
-                    region=region
-                )
-            )
-            print(f"Index '{index_name}' created.")
-
-        index = pinecone_client.Index(index_name)
-        try:
+            # Ensure the index exists
+            if not ensure_index_exists(index_name, pinecone_client, settings):
+                print(f"ERROR: Failed to ensure index '{index_name}' exists")
+                update_vector_store_globals(user_id, None, None)
+                return
+            
+            # Get the index
+            global index
+            index = pinecone_client.Index(index_name)
+            
+            # Create new vector store
             new_vectorstore = PineconeVectorStore(
                 index=index,
                 embedding=embeddings_instance,
                 text_key="text",
                 namespace=user_id
             )
-            print(f"VECTORSTORE WAS INITIALIZED SUCCESSFULLY!!!!!")
-        except Exception as e:
-            print(f"ERROR: Failed to load Pinecone vector store: {e}")
-            update_vector_store_globals(user_id, None, None)
-            return
+            print(f"New vector store created for user {user_id}")
 
+        # Get collection count
         try:
-            stats = index.describe_index_stats()
-            # Correctly access total_vector_count from the stats object
-            collection_count = stats.get('total_vector_count', 0)
-            print(f"..........>>>>>>>>>>>>>There are {collection_count} chunks in the vector store and {RETRIEVAL_CONFIG['default_k']} chunks~~~~<<<<<<<<<-------")
+            # Get the index for stats
+            stats_index = pinecone_client.Index(index_name)
+            stats = stats_index.describe_index_stats()
+            namespaces = stats.get('namespaces', {})
+            user_namespace_stats = namespaces.get(user_id, {})
+            collection_count = user_namespace_stats.get('vector_count', 0)
+            print(f"..........>>>>>>>>>>>>>There are {collection_count} chunks in the vector store for user {user_id} and {RETRIEVAL_CONFIG['default_k']} chunks~~~~<<<<<<<<<-------")
         except Exception as e:
             print(f"ERROR: Failed to get collection count: {e}")
             collection_count = 0
 
+        # Create retriever
         new_retriever = create_advanced_retriever(new_vectorstore)
         if new_retriever is None:
             print(f"ERROR: Failed to create retriever for user {user_id}")

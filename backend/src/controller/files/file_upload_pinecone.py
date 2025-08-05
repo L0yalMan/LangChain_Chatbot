@@ -37,19 +37,11 @@ async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
         try:
             os.makedirs(temp_dir, exist_ok=True)
             print("Creating temporary directory and saving uploaded file...")
-
+            
+            from src.core.config_pinecone import settings
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
-            # Upload to S3 if client is available
-            if s3_client is not None:
-                with open(file_path, "rb") as data:
-                    print(f"Uploading file to S3... {file.filename}")
-                    s3_client.upload_fileobj(data, os.getenv("AWS_S3_BUCKET_NAME"), s3_key)
-                print(f"File '{file.filename}' uploaded to S3 at '{s3_key}'.")
-            else:
-                print("WARNING: S3 client not available. File will not be uploaded to S3.")
-                s3_key = "local_storage_only"
 
             docs = load_document(file_path, file_extension)
             if not docs:
@@ -60,9 +52,23 @@ async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
 
             if not splits:
                 raise HTTPException(status_code=400, detail="No text chunks could be created from the document.")
-
+            
+            for i, chunk in enumerate(splits):
+                # Add comprehensive metadata for per-file tracking and deletion
+                chunk.metadata.update({
+                    'source': file.filename,  # Original filename
+                    'user_id': user_id,       # User isolation
+                    'chunk_index': i,
+                    'total_chunks': len(splits),
+                    'file_extension': file_extension,
+                    's3_key': s3_key,  # S3 storage key for file deletion
+                    'file_size': os.path.getsize(file_path)
+                })
+            
             print(f"--- CHUNKS CREATED FROM UPLOADED FILE: {file.filename} ---")
             print(f"Total chunks created: {len(splits)}")
+            print(f"S3 Key: {s3_key}")
+            
             for i, chunk in enumerate(splits):
                 try:
                     print(f"\n--- CHUNK {i+1}/{len(splits)} ---")
@@ -72,37 +78,97 @@ async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
                 except Exception as e:
                     print(f"ERROR: Failed to print chunk {i+1}: {e}")
 
+            # Get Pinecone client and index name early for all code paths
+            from src.core.retriver_pinecone import load_existing_vector_store
+            from src.core.config_pinecone import get_pinecone_client
+            
+            pinecone_client = get_pinecone_client()
+            index_name = settings.PINECONE_INDEX_NAME
+            
             vectorstore = vectorstores.get(user_id)
             if vectorstore:
                 print("--- APPENDING TO EXISTING VECTOR STORE ---")
                 vectorstore.add_documents(splits)
+                # Update the global vectorstore reference
+                update_vector_store_globals(user_id, vectorstore, None)
             else:
-                print("--- CREATING NEW VECTOR STORE ---")
-                new_vectorstore = PineconeVectorStore(
-                    index=index,
-                    embedding=embeddings,
-                    text_key="text",
-                    namespace=user_id
-                )
-                update_vector_store_globals(user_id, new_vectorstore, None)
-                vectorstore = new_vectorstore
+                print("--- LOADING OR CREATING VECTOR STORE ---")
+                
+                # Try to load existing vector store first
+                existing_vectorstore = load_existing_vector_store(user_id, index_name, embeddings)
+                
+                if existing_vectorstore:
+                    print("--- LOADED EXISTING VECTOR STORE ---")
+                    vectorstore = existing_vectorstore
+                    vectorstore.add_documents(splits)
+                else:
+                    print("--- CREATING NEW VECTOR STORE ---")
+                    # Ensure the index exists before creating vector store
+                    from src.core.retriver_pinecone import ensure_index_exists
+                    from src.core.config_pinecone import settings
+                    
+                    if ensure_index_exists(index_name, pinecone_client, settings):
+                        new_vectorstore = PineconeVectorStore(
+                            index=pinecone_client.Index(index_name),
+                            embedding=embeddings,
+                            text_key="text",
+                            namespace=user_id
+                        )
+                        vectorstore = new_vectorstore
+                    else:
+                        raise HTTPException(status_code=500, detail="Failed to create or access Pinecone index")
+                try:
+                    stats = index.describe_index_stats()
+                    namespaces = stats.get('namespaces', {})
+                    user_namespace_stats = namespaces.get(user_id, {})
+                    remaining_vectors = user_namespace_stats.get('vector_count', 0)
+                    print(f"Remaining vectors for user {user_id}: {remaining_vectors}")
+                except Exception as e:
+                    print(f"ERROR: Failed to Remaining vectors for user {user_id}: {e}")
+                update_vector_store_globals(user_id, vectorstore, None)
+
 
             # Re-initialize the retriever for the user
-            current_vectorstore = vectorstore
-            new_retriever = create_advanced_retriever(current_vectorstore)
-            if new_retriever is None:
-                print("WARNING: Failed to create advanced retriever after file upload")
-            else:
-                update_vector_store_globals(current_vectorstore, new_retriever)
+            try:
+                current_vectorstore = vectorstore
+                new_retriever = create_advanced_retriever(current_vectorstore)
+                if new_retriever is None:
+                    print("WARNING: Failed to create advanced retriever after file upload")
+                    # Update with None retriever
+                    update_vector_store_globals(user_id, current_vectorstore, None)
+                else:
+                    # Update with new retriever
+                    update_vector_store_globals(user_id, current_vectorstore, new_retriever)
+            except Exception as retriever_error:
+                print(f"ERROR: Failed to create retriever after file upload: {retriever_error}")
+                # Update with None retriever as fallback
+                update_vector_store_globals(user_id, vectorstore, None)
 
             try:
-                collection_count = vectorstore._collection.count()
-                print(f"--- VECTOR STORE UPDATED ---")
-                print(f"Total chunks in vector store after upload: {collection_count}")
+                # Get collection count using the new Pinecone API
+                if pinecone_client and index_name:
+                    stats = pinecone_client.Index(index_name).describe_index_stats()
+                    namespaces = stats.get('namespaces', {})
+                    user_namespace_stats = namespaces.get(user_id, {})
+                    collection_count = user_namespace_stats.get('vector_count', 0)
+                    print(f"--- VECTOR STORE UPDATED ---")
+                    print(f"Total chunks in vector store after upload: {collection_count}")
+                else:
+                    print("WARNING: Pinecone client or index name not available for collection count")
             except Exception as e:
                 print(f"Could not get updated collection count: {e}")
 
             print(f"File '{file.filename}' processed. Vector store is ready in Pinecone.")
+
+            # Upload to S3 if client is available
+            if s3_client is not None:
+                with open(file_path, "rb") as data:
+                    print(f"Uploading file to S3... {file.filename}")
+                    s3_client.upload_fileobj(data, settings.AWS_S3_BUCKET_NAME , s3_key)
+                print(f"File '{file.filename}' uploaded to S3 at '{s3_key}'.")
+            else:
+                print("WARNING: S3 client not available. File will not be uploaded to S3.")
+                s3_key = "local_storage_only"
 
             # Determine success message based on S3 availability
             if s3_client is not None:
@@ -112,7 +178,14 @@ async def upload_file(current_user: TokenData, file: UploadFile = File(...)):
 
             return JSONResponse(
                 status_code=200,
-                content={"message": message, "key": f"{s3_key}"}
+                content={
+                    "message": message, 
+                    "key": s3_key,
+                    "chunks_processed": len(splits),
+                    "file_size": os.path.getsize(file_path),
+                    "user_id": user_id,
+                    "filename": file.filename
+                }
             )
 
         except HTTPException:

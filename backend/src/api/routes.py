@@ -6,7 +6,7 @@ from src.core.models import ChatRequest
 from src.controller.chat.chat_pinecone import chat_with_rag
 from src.controller.files.file_upload_pinecone import upload_file
 from src.controller.files.file_delete_pinecone import delete_file
-from src.controller.website.ingest_website_pinecone import ingest_website_link
+from src.controller.website.ingest_website_pinecone import ingest_website_link, delete_website_link
 from src.core.retriver_pinecone import initialize_vector_store
 from src.core.config_pinecone import get_global_state
 
@@ -43,6 +43,13 @@ async def ingest_website_link_endpoint(
     current_user: TokenData = Depends(get_current_user)
 ):
     return await ingest_website_link(request, current_user)
+
+@router.post("/delete-website/")
+async def delete_website_link_endpoint(
+    request: Request,
+    current_user: TokenData = Depends(get_current_user)
+):
+    return await delete_website_link(request, current_user)
 
 @router.post("/chat/")
 async def chat_with_rag_endpoint(

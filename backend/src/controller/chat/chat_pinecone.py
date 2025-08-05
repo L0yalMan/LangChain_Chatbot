@@ -26,7 +26,35 @@ async def chat_with_rag(request_data: ChatRequest, current_user: TokenData):
         if not vectorstores.get(user_id) or not retrievers.get(user_id):
             print(f"DEBUG: Global state before re-initialization for user {user_id}: {get_global_state(user_id)}")
             try:
-                initialize_vector_store(user_id)
+                # Try to load existing vector store first
+                from src.core.retriver_pinecone import load_existing_vector_store, check_vector_store_exists
+                from src.core.config_pinecone import get_pinecone_client, get_embeddings, settings
+                
+                pinecone_client = get_pinecone_client()
+                embeddings_instance = get_embeddings()
+                index_name = settings.PINECONE_INDEX_NAME
+                
+                # Check if vector store exists for this user
+                if check_vector_store_exists(user_id, index_name):
+                    print(f"Found existing vector store for user {user_id}, loading it...")
+                    existing_vectorstore = load_existing_vector_store(user_id, index_name, embeddings_instance)
+                    if existing_vectorstore:
+                        from src.core.retriver_pinecone import create_advanced_retriever
+                        new_retriever = create_advanced_retriever(existing_vectorstore)
+                        if new_retriever:
+                            from src.core.config_pinecone import update_vector_store_globals
+                            update_vector_store_globals(user_id, existing_vectorstore, new_retriever)
+                            print(f"Successfully loaded existing vector store and retriever for user {user_id}")
+                        else:
+                            print(f"Failed to create retriever for existing vector store for user {user_id}")
+                            initialize_vector_store(user_id)
+                    else:
+                        print(f"Failed to load existing vector store for user {user_id}, initializing new one...")
+                        initialize_vector_store(user_id)
+                else:
+                    print(f"No existing vector store found for user {user_id}, initializing new one...")
+                    initialize_vector_store(user_id)
+                
                 from src.core.config_pinecone import vectorstores, retrievers
             except Exception as e:
                 print(f"ERROR: Failed to re-initialize vector store for user {user_id}: {e}")
@@ -40,7 +68,15 @@ async def chat_with_rag(request_data: ChatRequest, current_user: TokenData):
 
         # Check if vector store has any documents
         try:
-            collection_count = vectorstores.get(user_id)._collection.count()
+            # Improved: Use public API to get collection count, handle missing attribute gracefully
+            vectorstore = vectorstores.get(user_id)
+            collection_count = 0
+            if hasattr(vectorstore, "index"):
+                try:
+                    stats = vectorstore.index.describe_index_stats()
+                    collection_count = stats.get("total_vector_count", 0)
+                except Exception as e:
+                    print(f"WARNING: Could not retrieve index stats: {e}")
             if collection_count == 0:
                 print(f"detail=Vector store is empty. Please upload a document first.")
                 # raise HTTPException(
